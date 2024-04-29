@@ -18,7 +18,7 @@ from botocore.client import Config
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
-from flask import abort, flash, redirect, render_template, request, session, url_for
+from flask import abort, flash, redirect, render_template, request, session, url_for, jsonify
 
 from app import app, db
 from decorators import authenticated, is_premium
@@ -47,11 +47,11 @@ def annotate():
 
     # Generate unique ID to be used as S3 key (name)
     key_name = (
-        app.config["AWS_S3_KEY_PREFIX"]
-        + user_id
-        + "/"
-        + str(uuid.uuid4())
-        + "~${filename}"
+            app.config["AWS_S3_KEY_PREFIX"]
+            + user_id
+            + "/"
+            + str(uuid.uuid4())
+            + "~${filename}"
     )
 
     # Create the redirect URL
@@ -104,7 +104,6 @@ homework assignments
 
 @app.route("/annotate/job", methods=["GET"])
 def create_annotation_job_request():
-
     region = app.config["AWS_REGION_NAME"]
 
     # Parse redirect URL query parameters for S3 object info
@@ -112,13 +111,76 @@ def create_annotation_job_request():
     s3_key = request.args.get("key")
 
     # Extract the job ID from the S3 key
-    # Move your code here
-
+    job_id = s3_key.split('/')[2].split('~')[0]
+    user_name = s3_key.split('/')[1]
+    file_name = s3_key.split('/')[2].split('~')[1]
+    submit_time = datetime.utcnow().isoformat() + 'Z'
     # Persist job to database
-    # Move your code here...
+    data = {"job_id": job_id,
+            "user_id": user_name,
+            "input_file_name": file_name,
+            "s3_inputs_bucket": bucket_name,
+            "s3_key_input_file": s3_key,
+            "submit_time": submit_time,
+            "job_status": "PENDING"
+            }
+
+    # Initialize a boto3 client
+    # Reference: Table: dynamodb.Table operation
+    # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/dynamodb/table/index.html
+    dynamodb = boto3.resource('dynamodb', region_name=region)
+    table = dynamodb.Table(app.config['AWS_DYNAMODB_ANNOTATIONS_TABLE'])
+    try:
+        table.put_item(Item=data)
+    except ClientError as e:
+        # Handle client-side errors (e.g., missing table, bad request format)
+        app.logger.error(f"ClientError in DynamoDB operation: {e}")
+        return abort(500)
+    except BotoCoreError as e:
+        # Handle errors that are less straightforward, could be due to issues on boto3's end
+        app.logger.error(f"BotoCoreError in DynamoDB operation: {e}")
+        return abort(500)
+    except Exception as e:
+        # General exception catch block, just in case
+        app.logger.error(f"Unexpected error: {e}")
+        return abort(500)
 
     # Send message to request queue
-    # Move your code here...
+    # Create an SNS client
+    # Reference: SNS Client
+    # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/sns.html
+    sns = boto3.client('sns', region_name=app.config["AWS_REGION_NAME"])
+    topic_arn = app.config["AWS_SNS_JOB_REQUEST_TOPIC"]
+    print(topic_arn)
+    # Reference: sns publish
+    # From AWS boto3 documentation - publish
+    # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/sns/client/publish.html
+    try:
+        response = sns.publish(
+            TopicArn=topic_arn,
+            Message=json.dumps(data)
+        )
+        print(response)
+    except ClientError as e:
+        # Handle client-side or server-side error from AWS
+        app.logger.error(f"ClientError in SNS operation: {e.response['Error']['Message']}")
+        return abort(500)  # Use abort to trigger the 500 error handler
+    except ParamValidationError as e:
+        # Handle parameter validation errors
+        app.logger.error(f"Parameter Validation Error: {str(e)}")
+        return abort(400)  # Use abort to trigger the 400 error handler
+    except EndpointConnectionError as e:
+        # Handle connection errors
+        app.logger.error(f"Endpoint Connection Error: {str(e)}")
+        return abort(500)  # Use abort to trigger the 500 error handler
+    except BotoCoreError as e:
+        # Handle errors from the core Boto3 library
+        app.logger.error(f"BotoCore Error: {str(e)}")
+        return abort(500)  # Use abort for 500 errors
+    except Exception as e:
+        # Generic handler for any other exceptions
+        app.logger.error(f"Unknown Error: {str(e)}")
+        return abort(500)  # Use abort for 500 errors
 
     return render_template("annotate_confirm.html", job_id=job_id)
 
@@ -129,7 +191,6 @@ def create_annotation_job_request():
 
 @app.route("/annotations", methods=["GET"])
 def annotations_list():
-
     # Get list of annotations to display
 
     return render_template("annotations.html", annotations=None)
@@ -236,6 +297,24 @@ def login():
     return redirect(url_for("authcallback"))
 
 
+"""400 Bad Request error handler
+"""
+
+
+@app.errorhandler(400)
+def bad_request(e):
+    return (
+        render_template(
+            "error.html",
+            title="Bad Request",
+            alert_level="warning",
+            message="The request could not be understood by the server due to malformed syntax. \
+      Please check your input and try again.",
+        ),
+        400,
+    )
+
+
 """404 error handler
 """
 
@@ -312,7 +391,6 @@ def internal_error(error):
 """CSRF error handler
 """
 
-
 from flask_wtf.csrf import CSRFError
 
 
@@ -327,6 +405,5 @@ def csrf_error(error):
         ),
         400,
     )
-
 
 ### EOF
