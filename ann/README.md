@@ -10,3 +10,7 @@ For those that convert the annotator to run as a Flask app with a webhook, you m
 * `run_ann_webhook.py` - Runs the annotator Flask app
 
 The annotator Flask app must listen for requests on port 5000, as defined in `run_ann_webhook.sh`.
+
+
+Please visit:
+https://runqingc-a10-web.ucmpcs.org:4433/
