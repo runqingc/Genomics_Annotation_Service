@@ -25,6 +25,18 @@ from app import app, db
 from decorators import authenticated, is_premium
 from auth import get_profile
 
+
+def format_time(time_utc):
+    # Display the date/time in the instance timezone
+    # Reference : the usage of ZoneInfo
+    # https://docs.python.org/3/library/zoneinfo.html
+    dt_utc = datetime.strptime(time_utc, "%Y-%m-%dT%H:%M:%S.%fZ")
+    timezone = ZoneInfo(app.config["AWS_TIMEZONE"])
+    dt_local = dt_utc.replace(tzinfo=ZoneInfo('UTC')).astimezone(timezone)
+    formatted_time = dt_local.strftime("%Y-%m-%d @ %H:%M:%S")
+    return formatted_time
+
+
 """Start annotation request
 Create the required AWS S3 policy document and render a form for
 uploading an annotation input file using the policy document
@@ -193,12 +205,13 @@ def create_annotation_job_request():
 
 
 @app.route("/annotations", methods=["GET"])
-@authenticated
 def annotations_list():
     region = app.config["AWS_REGION_NAME"]
     # Get list of annotations to display
     user_id = session.get('primary_identity')
-
+    # handle unauthorized access
+    if user_id is None:
+        return abort(403)
     # Query the dynamodb to retrieve information
     dynamodb = boto3.resource('dynamodb', region_name=region)
     table = dynamodb.Table(app.config['AWS_DYNAMODB_ANNOTATIONS_TABLE'])
@@ -235,16 +248,8 @@ def annotations_list():
 
     annotations = []
     for item in response['Items']:
-        time_utc = item['submit_time']
-        # Display the date/time in the instance timezone
-        # Reference : the usage of ZoneInfo
-        # https://docs.python.org/3/library/zoneinfo.html
-        dt_utc = datetime.strptime(time_utc, "%Y-%m-%dT%H:%M:%S.%fZ")
-        timezone = ZoneInfo(app.config["AWS_TIMEZONE"])
-        dt_local = dt_utc.replace(tzinfo=ZoneInfo('UTC')).astimezone(timezone)
-        formatted_time = dt_local.strftime("%Y-%m-%d @ %H:%M:%S")
         annotations.append(
-            {"id": item['job_id'], "request_time": formatted_time, "file_name": item['input_file_name'],
+            {"id": item['job_id'], "request_time": format_time(item['submit_time']), "file_name": item['input_file_name'],
              "status": item['job_status']})
 
     return render_template("annotations.html", annotations=annotations)
