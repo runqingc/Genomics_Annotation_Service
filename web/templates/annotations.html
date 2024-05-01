@@ -27,6 +27,31 @@ University of Chicago
         </div>
 
         <!-- DISPLAY LIST OF ANNOTATION JOBS -->
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Request ID</th>
+                    <th>Request Time</th>
+                    <th>VCF File Name</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for annotation in annotations %}
+                <tr>
+                    <td>{{ annotation.id }}</td>
+                    <td>{{ annotation.request_time }}</td>
+                    <td>{{ annotation.file_name }}</td>
+                    <td>{{ annotation.status }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="4">No annotations found</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
 
     </div> <!-- container -->
 

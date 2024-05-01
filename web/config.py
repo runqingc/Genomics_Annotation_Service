@@ -71,6 +71,7 @@ class Config(object):
         if ("AWS_REGION_NAME" in os.environ)
         else "us-east-1"
     )
+    AWS_TIMEZONE = 'America/Chicago'
 
     # Get various credentials from AWS Secrets Manager
     asm = boto3.client("secretsmanager", region_name=AWS_REGION_NAME)
@@ -146,17 +147,18 @@ class Config(object):
     AWS_S3_KEY_PREFIX = f"{iam_username}/"
     AWS_S3_ACL = "private"
     AWS_S3_ENCRYPTION = "AES256"
+    AWS_S3_SECONDARY_INDEX = 'user_id_index'
 
     AWS_GLACIER_VAULT = "ucmpcs"
 
     # AWS SNS topics
     AWS_SNS_JOB_REQUEST_TOPIC = (
-        f"arn:aws:sns:us-east-1:127134666975:{iam_username}_a10_job_requests"
+        f"arn:aws:sns:us-east-1:127134666975:{iam_username}_a11_job_requests"
     )
 
 
     # AWS SQS queues
-    AWS_SQS_REQUESTS_QUEUE_NAME = "runqingc_a10_job_requests"
+    AWS_SQS_REQUESTS_QUEUE_NAME = "runqingc_a11_job_requests"
 
     # AWS DynamoDB table
     AWS_DYNAMODB_ANNOTATIONS_TABLE = f"{iam_username}_annotations"

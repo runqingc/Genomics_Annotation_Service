@@ -12,6 +12,7 @@ import uuid
 import time
 import json
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import boto3
 from botocore.client import Config
@@ -22,6 +23,7 @@ from flask import abort, flash, redirect, render_template, request, session, url
 
 from app import app, db
 from decorators import authenticated, is_premium
+from auth import get_profile
 
 """Start annotation request
 Create the required AWS S3 policy document and render a form for
@@ -103,6 +105,7 @@ homework assignments
 
 
 @app.route("/annotate/job", methods=["GET"])
+@authenticated
 def create_annotation_job_request():
     region = app.config["AWS_REGION_NAME"]
 
@@ -190,10 +193,61 @@ def create_annotation_job_request():
 
 
 @app.route("/annotations", methods=["GET"])
+@authenticated
 def annotations_list():
+    region = app.config["AWS_REGION_NAME"]
     # Get list of annotations to display
+    user_id = session.get('primary_identity')
 
-    return render_template("annotations.html", annotations=None)
+    # Query the dynamodb to retrieve information
+    dynamodb = boto3.resource('dynamodb', region_name=region)
+    table = dynamodb.Table(app.config['AWS_DYNAMODB_ANNOTATIONS_TABLE'])
+
+    # Reference: How to query to dynamodb using index
+    # From AWS boto3 documentation - query
+    # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/dynamodb/client/query.html
+    try:
+        response = table.query(
+            IndexName=app.config["AWS_S3_SECONDARY_INDEX"],
+            KeyConditionExpression=Key('user_id').eq(user_id)
+        )
+        print(response)
+    except ClientError as e:
+        # Handle client-side or server-side error from AWS
+        app.logger.error(f"ClientError in DynamoDB operation: {e.response['Error']['Message']}")
+        return abort(500)  # Use abort to trigger the 500 error handler
+    except ParamValidationError as e:
+        # Handle parameter validation errors
+        app.logger.error(f"Parameter Validation Error: {str(e)}")
+        return abort(400)  # Use abort to trigger the 400 error handler
+    except EndpointConnectionError as e:
+        # Handle connection errors to AWS services
+        app.logger.error(f"Endpoint Connection Error: {str(e)}")
+        return abort(500)  # Use abort to trigger the 500 error handler
+    except BotoCoreError as e:
+        # Handle errors from the core Boto3 library
+        app.logger.error(f"BotoCore Error: {str(e)}")
+        return abort(500)  # Use abort for 500 errors
+    except Exception as e:
+        # Generic handler for any other exceptions
+        app.logger.error(f"Unknown Error: {str(e)}")
+        return abort(500)  # Use abort for 500 errors
+
+    annotations = []
+    for item in response['Items']:
+        time_utc = item['submit_time']
+        # Display the date/time in the instance timezone
+        # Reference : the usage of ZoneInfo
+        # https://docs.python.org/3/library/zoneinfo.html
+        dt_utc = datetime.strptime(time_utc, "%Y-%m-%dT%H:%M:%S.%fZ")
+        timezone = ZoneInfo(app.config["AWS_TIMEZONE"])
+        dt_local = dt_utc.replace(tzinfo=ZoneInfo('UTC')).astimezone(timezone)
+        formatted_time = dt_local.strftime("%Y-%m-%d @ %H:%M:%S")
+        annotations.append(
+            {"id": item['job_id'], "request_time": formatted_time, "file_name": item['input_file_name'],
+             "status": item['job_status']})
+
+    return render_template("annotations.html", annotations=annotations)
 
 
 """Display details of a specific annotation job
@@ -201,6 +255,7 @@ def annotations_list():
 
 
 @app.route("/annotations/<id>", methods=["GET"])
+@authenticated
 def annotation_details(id):
     pass
 
@@ -210,6 +265,7 @@ def annotation_details(id):
 
 
 @app.route("/annotations/<id>/log", methods=["GET"])
+@authenticated
 def annotation_log(id):
     pass
 
@@ -221,6 +277,7 @@ from auth import update_profile
 
 
 @app.route("/subscribe", methods=["GET", "POST"])
+@authenticated
 def subscribe():
     if request.method == "GET":
         # Display form to get subscriber credit card info
