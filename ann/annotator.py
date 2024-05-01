@@ -24,7 +24,7 @@ config.read("annotator_config.ini")
 aws_region = config.get('aws', 'AwsRegionName')
 queue_url = config.get('sqs', 'QueueUrl')
 CNetID = config.get('DEFAULT', 'CnetId')
-
+annotations_table = config.get('gas', 'AnnotationsTable')
 """Reads request messages from SQS and runs AnnTools as a subprocess.
 
 Move existing annotator code here
@@ -171,8 +171,8 @@ def update_job_status(local_uuid):
         True if the database was updated correctly, False otherwise
     """
     try:
-        dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
-        table = dynamodb.Table('runqingc_annotations')
+        dynamodb = boto3.resource('dynamodb', region_name=aws_region)
+        table = dynamodb.Table(annotations_table)
         table.update_item(
             Key={
                 'job_id': local_uuid

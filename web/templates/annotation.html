@@ -19,6 +19,30 @@ University of Chicago
         </div>
 
         <!-- DISPLAY ANNOTATION JOB DETAILS -->
+        <table class="table">
+            <tr>
+                <th>Request ID:</th>
+                <td>{{ request_id }}</td>
+            </tr>
+            <tr>
+                <th>Request Time:</th>
+                <td>{{ request_time }}</td>
+            </tr>
+            <tr>
+                <th>VCF Input File:</th>
+                <td>{{ vcf_input_file }}</td>
+            </tr>
+            <tr>
+                <th>Status:</th>
+                <td>{{ status }}</td>
+            </tr>
+            {% if status == 'COMPLETED' %}
+            <tr>
+                <th>Complete Time:</th>
+                <td>{{ complete_time }}</td>
+            </tr>
+            {% endif %}
+        </table>
 
         <hr />
 

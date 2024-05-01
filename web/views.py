@@ -224,7 +224,6 @@ def annotations_list():
             IndexName=app.config["AWS_S3_SECONDARY_INDEX"],
             KeyConditionExpression=Key('user_id').eq(user_id)
         )
-        print(response)
     except ClientError as e:
         # Handle client-side or server-side error from AWS
         app.logger.error(f"ClientError in DynamoDB operation: {e.response['Error']['Message']}")
@@ -262,7 +261,38 @@ def annotations_list():
 @app.route("/annotations/<id>", methods=["GET"])
 @authenticated
 def annotation_details(id):
-    pass
+
+    dynamodb = boto3.resource('dynamodb', region_name=app.config["AWS_REGION_NAME"])
+    table = dynamodb.Table(app.config['AWS_DYNAMODB_ANNOTATIONS_TABLE'])
+    key = {'job_id': id}
+    # [TODO: catch exception here]
+    response = table.get_item(Key=key)
+
+    job_detail = response.get('Item')
+    # handle error when user typed in an invalid job detail
+    if job_detail is None:
+        return abort(404)
+
+    user_id = session.get('primary_identity')
+    # check the requested job ID belongs to the user that is currently authenticated
+    if user_id != job_detail['user_id']:
+        return abort(403)
+    
+    # Retrieve information
+    request_id = job_detail['job_id']
+    request_time = format_time(job_detail['submit_time'])
+    vcf_input_file = job_detail['input_file_name']
+    status = job_detail['job_status']
+    complete_time = 'N/A'
+    if status == 'COMPLETED':
+        complete_time = format_time(job_detail['complete_time'])
+    
+    return render_template("annotation.html", request_id=request_id,
+                           request_time=request_time,
+                           vcf_input_file=vcf_input_file,
+                           status=status,
+                           complete_time=complete_time
+                           )
 
 
 """Display the log file contents for an annotation job
