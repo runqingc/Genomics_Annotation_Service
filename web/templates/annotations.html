@@ -39,7 +39,7 @@ University of Chicago
             <tbody>
                 {% for annotation in annotations %}
                 <tr>
-                    <td>{{ annotation.id }}</td>
+                    <td><a href="{{ url_for('annotation_details', id=annotation.id) }}">{{ annotation.id }}</a></td>
                     <td>{{ annotation.request_time }}</td>
                     <td>{{ annotation.file_name }}</td>
                     <td>{{ annotation.status }}</td>
