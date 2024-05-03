@@ -31,7 +31,7 @@ Move existing annotator code here
 """
 
 
-def receive_sqs_messages(sqs, max_number=10, wait_time=20):
+def receive_sqs_messages(sqs, max_number=config.get('sqs', 'MaxMessages'), wait_time=config.get('sqs', 'WaitTime')):
     """
     Attempt to read a specified maximum number of messages from the queue using long polling.
 
