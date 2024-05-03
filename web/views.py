@@ -164,7 +164,10 @@ def create_annotation_job_request():
             "s3_inputs_bucket": bucket_name,
             "s3_key_input_file": s3_key,
             "submit_time": submit_time,
-            "job_status": "PENDING"
+            "job_status": "PENDING",
+            "user_name": session['name'],
+            "user_email": session['email'],
+            "user_role": session['role']
             }
 
     # Initialize a boto3 client
