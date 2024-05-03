@@ -25,13 +25,15 @@ aws_region = config.get('aws', 'AwsRegionName')
 queue_url = config.get('sqs', 'QueueUrl')
 CNetID = config.get('DEFAULT', 'CnetId')
 annotations_table = config.get('gas', 'AnnotationsTable')
+max_number=int(config.get('sqs', 'MaxMessages'))
+wait_time=int(config.get('sqs', 'WaitTime'))
 """Reads request messages from SQS and runs AnnTools as a subprocess.
 
 Move existing annotator code here
 """
 
 
-def receive_sqs_messages(sqs, max_number=config.get('sqs', 'MaxMessages'), wait_time=config.get('sqs', 'WaitTime')):
+def receive_sqs_messages(sqs):
     """
     Attempt to read a specified maximum number of messages from the queue using long polling.
 
