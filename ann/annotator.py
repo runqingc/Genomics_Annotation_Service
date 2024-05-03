@@ -93,12 +93,22 @@ def copy_file_from_s3(s3_bucket_name, s3_file_name, local_user_id, local_uuid, l
     local_directory_base = f'./anntools/data/{local_user_id}'
     # Create unique local directory to preserve the input file
     local_directory = os.path.join(local_directory_base, local_uuid)
-    if not os.path.exists(local_directory):
-        os.makedirs(local_directory)
+    try:
+        if not os.path.exists(local_directory):
+            os.makedirs(local_directory)
+    except OSError as e:
+        print(f"Failed to create directory {local_directory}: {e}")
+        return False
     # List objects in the S3 bucket at the specified prefix
     # Reference: list_objects_v2
     # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3/client/list_objects_v2.html
-    s3_response = s3.list_objects_v2(Bucket=s3_bucket_name, Prefix=local_prefix)
+    try:
+        # List objects in the S3 bucket at the specified prefix
+        s3_response = s3.list_objects_v2(Bucket=s3_bucket_name, Prefix=local_prefix)
+    except ClientError as e:
+        print(f"Error listing objects in bucket {s3_bucket_name} with prefix {local_prefix}: {e}")
+        return False
+
 
     if 'Contents' in s3_response and len(s3_response['Contents']) > 0:
         # There's only one file matches, and it starts with the uuid
@@ -118,6 +128,12 @@ def copy_file_from_s3(s3_bucket_name, s3_file_name, local_user_id, local_uuid, l
                 # Other S3 related errors
                 print(f"Failed to download {s3_file_name}: {e}")
                 return False
+        except NotADirectoryError as e:
+            print(f"Target is not a directory: {e}")
+            return False
+        except Exception as e:
+            print(f"An unexpected error occurred: {e}")
+            return False
     else:
         print("No files found at the specified prefix.")
         return False

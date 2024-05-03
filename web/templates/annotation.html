@@ -30,7 +30,7 @@ University of Chicago
             </tr>
             <tr>
                 <th>VCF Input File:</th>
-                <td>{{ vcf_input_file }}</td>
+                <td><a href="{{ input_file_download_url }}" download>{{ vcf_input_file }}</a></td>
             </tr>
             <tr>
                 <th>Status:</th>
@@ -45,6 +45,22 @@ University of Chicago
         </table>
 
         <hr />
+
+        {% if status == 'COMPLETED' %}
+        <table class="table">
+            <tr>
+                <th>Annotated Results File: </th>
+                <td><a href="{{ result_file_download_url }}" download>download</a></td>
+            </tr>
+            <tr>
+                <th>Annotated Log File: </th>
+                <td><a href="{{ log_file_view_url }}">view</a></td>
+            </tr>
+        </table>
+
+        <hr />
+        {% endif %}
+
 
         <a href="{{ url_for('annotations_list') }}">&larr; back to annotations list</a>
 

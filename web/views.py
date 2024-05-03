@@ -27,7 +27,7 @@ from auth import get_profile
 
 
 def format_time(time_utc):
-    # Display the date/time in the instance timezone
+    # Helper function to display the date/time in the instance timezone
     # Reference : the usage of ZoneInfo
     # https://docs.python.org/3/library/zoneinfo.html
     dt_utc = datetime.strptime(time_utc, "%Y-%m-%dT%H:%M:%S.%fZ")
@@ -35,6 +35,33 @@ def format_time(time_utc):
     dt_local = dt_utc.replace(tzinfo=ZoneInfo('UTC')).astimezone(timezone)
     formatted_time = dt_local.strftime("%Y-%m-%d @ %H:%M:%S")
     return formatted_time
+
+
+def generate_download_url(s3_client, bucket_name, object_name, expiration=3600):
+    # Helper function to generate a pre signed URL to download a file from S3 bucket.
+    # Reference : Presigned URLs
+    # https://boto3.amazonaws.com/v1/documentation/api/latest/guide/s3-presigned-urls.html
+    try:
+        response = s3_client.generate_presigned_url('get_object',
+                                                    Params={'Bucket': bucket_name,
+                                                            'Key': object_name},
+                                                    ExpiresIn=expiration)
+    except ClientError as e:
+        # Log the error code and error message for more specificity
+        error_code = e.response['Error']['Code']
+        error_message = e.response['Error']['Message']
+        app.logger.error(f"ClientError generating presigned URL: {error_code}, {error_message}")
+        return None
+    except ParamValidationError as e:
+        # Handle cases where the parameters are incorrect
+        app.logger.error(f"Parameter validation error: {str(e)}")
+        return None
+    except Exception as e:
+        # Generic exception handling to catch unforeseen errors
+        app.logger.error(f"Unexpected error: {str(e)}")
+        return None
+    return response
+
 
 
 """Start annotation request
@@ -205,6 +232,7 @@ def create_annotation_job_request():
 
 
 @app.route("/annotations", methods=["GET"])
+@authenticated
 def annotations_list():
     region = app.config["AWS_REGION_NAME"]
     # Get list of annotations to display
@@ -265,8 +293,28 @@ def annotation_details(id):
     dynamodb = boto3.resource('dynamodb', region_name=app.config["AWS_REGION_NAME"])
     table = dynamodb.Table(app.config['AWS_DYNAMODB_ANNOTATIONS_TABLE'])
     key = {'job_id': id}
-    # [TODO: catch exception here]
-    response = table.get_item(Key=key)
+    try:
+        response = table.get_item(Key=key)
+        # Check if item was found
+        if 'Item' not in response:
+            app.logger.info("No item found with ID: {}".format(id))
+            return abort(404)  # Not found
+    except ClientError as e:
+        app.logger.error(f"ClientError in DynamoDB operation: {e.response['Error']['Message']}")
+        return abort(500)  # Internal server error
+    except ParamValidationError as e:
+        app.logger.error(f"Parameter Validation Error: {str(e)}")
+        return abort(400)  # Bad request
+    except EndpointConnectionError as e:
+        app.logger.error(f"Endpoint Connection Error: {str(e)}")
+        return abort(500)  # Internal server error
+    except BotoCoreError as e:
+        app.logger.error(f"BotoCore Error: {str(e)}")
+        return abort(500)  # Internal server error
+    except Exception as e:
+        # Generic handler for any other exceptions
+        app.logger.error(f"Unknown Error: {str(e)}")
+        return abort(500)  # Internal server error
 
     job_detail = response.get('Item')
     # handle error when user typed in an invalid job detail
@@ -279,19 +327,52 @@ def annotation_details(id):
         return abort(403)
     
     # Retrieve information
+    # Open a connection to the S3 service
+    s3 = boto3.client(
+        "s3",
+        region_name=app.config["AWS_REGION_NAME"],
+        config=Config(signature_version="s3v4"),
+    )
     request_id = job_detail['job_id']
     request_time = format_time(job_detail['submit_time'])
     vcf_input_file = job_detail['input_file_name']
     status = job_detail['job_status']
     complete_time = 'N/A'
+    result_file_download_url = ''
+    log_file_view_url = ''
+    # Generate unique ID to be used as S3 key (name)
+    input_file_key_name = (
+            app.config["AWS_S3_KEY_PREFIX"]
+            + user_id
+            + "/"
+            + request_id
+            + "~"
+            + vcf_input_file
+    )
+    input_file_download_url = generate_download_url(s3, app.config["AWS_S3_INPUTS_BUCKET"], input_file_key_name)
     if status == 'COMPLETED':
         complete_time = format_time(job_detail['complete_time'])
-    
+        # print("input_file_key_name: ", input_file_key_name)
+        result_file_key_name = (
+            app.config["AWS_S3_KEY_PREFIX"]
+            + user_id
+            + "/"
+            + request_id
+            + "/"
+            + vcf_input_file.split('.')[0]
+            + ".annot.vcf"
+        )
+        result_file_download_url = generate_download_url(s3, app.config["AWS_S3_RESULTS_BUCKET"], result_file_key_name)
+        log_file_view_url = url_for('annotation_log', id=id)
+        print("log_file_view_url:", log_file_view_url)
     return render_template("annotation.html", request_id=request_id,
                            request_time=request_time,
                            vcf_input_file=vcf_input_file,
                            status=status,
-                           complete_time=complete_time
+                           complete_time=complete_time,
+                           input_file_download_url=input_file_download_url,
+                           result_file_download_url=result_file_download_url,
+                           log_file_view_url=log_file_view_url
                            )
 
 
@@ -302,7 +383,94 @@ def annotation_details(id):
 @app.route("/annotations/<id>/log", methods=["GET"])
 @authenticated
 def annotation_log(id):
-    pass
+    # check the requested job ID belongs to the user that is currently authenticated
+    dynamodb = boto3.resource('dynamodb', region_name=app.config["AWS_REGION_NAME"])
+    table = dynamodb.Table(app.config['AWS_DYNAMODB_ANNOTATIONS_TABLE'])
+    key = {'job_id': id}
+    try:
+        response = table.get_item(Key=key)
+        # Check if item was found
+        if 'Item' not in response:
+            app.logger.info("No item found with ID: {}".format(id))
+            return abort(404)  # Not found
+    except ClientError as e:
+        app.logger.error(f"ClientError in DynamoDB operation: {e.response['Error']['Message']}")
+        return abort(500)  # Internal server error
+    except ParamValidationError as e:
+        app.logger.error(f"Parameter Validation Error: {str(e)}")
+        return abort(400)  # Bad request
+    except EndpointConnectionError as e:
+        app.logger.error(f"Endpoint Connection Error: {str(e)}")
+        return abort(500)  # Internal server error
+    except BotoCoreError as e:
+        app.logger.error(f"BotoCore Error: {str(e)}")
+        return abort(500)  # Internal server error
+    except Exception as e:
+        # Generic handler for any other exceptions
+        app.logger.error(f"Unknown Error: {str(e)}")
+        return abort(500)  # Internal server error
+
+    job_detail = response.get('Item')
+    # handle error when user typed in an invalid job detail
+    if job_detail is None:
+        return abort(404)
+
+    user_id = session.get('primary_identity')
+    # check the requested job ID belongs to the user that is currently authenticated
+    if user_id != job_detail['user_id']:
+        return abort(403)
+
+    # Retrieve information
+    request_id = job_detail['job_id']
+    vcf_input_file = job_detail['input_file_name']
+
+    # Open a connection to the S3 service
+    s3 = boto3.client(
+        "s3",
+        region_name=app.config["AWS_REGION_NAME"],
+        config=Config(signature_version="s3v4"),
+    )
+
+    log_file_key_name = (
+            app.config["AWS_S3_KEY_PREFIX"]
+            + user_id
+            + "/"
+            + request_id
+            + "/"
+            + vcf_input_file
+            + ".count.log"
+        )
+    print("log_file_key_name: ", log_file_key_name)
+
+    # retrieve the file content as a string
+    # show
+    try:
+        # Retrieve the log file content
+        log_obj = s3.get_object(Bucket=app.config["AWS_S3_RESULTS_BUCKET"], Key=log_file_key_name)
+        log_contents = log_obj['Body'].read().decode('utf-8')
+    except ClientError as e:
+        app.logger.error(f"Error retrieving log file from S3: {e.response['Error']['Message']}")
+        return abort(500)  # Internal server error
+    except ParamValidationError as e:
+        app.logger.error(f"Parameter Validation Error: {str(e)}")
+        return abort(400)  # Bad request
+    except EndpointConnectionError as e:
+        app.logger.error(f"Endpoint Connection Error: {str(e)}")
+        return abort(500)  # Internal server error
+    except NoCredentialsError as e:
+        app.logger.error("No credentials to access AWS services.")
+        return abort(500)  # Internal server error
+    except BotoCoreError as e:
+        app.logger.error(f"BotoCore Error: {str(e)}")
+        return abort(500)  # Internal server error
+    except HTTPError as e:
+        app.logger.error(f"HTTP Error: {str(e)}")
+        return abort(500)  # Internal server error
+    except Exception as e:
+        app.logger.error(f"Unknown Error: {str(e)}")
+        return abort(500)  # Internal server error
+
+    return render_template("view_log.html", log_contents=log_contents, job_id=request_id)
 
 
 """Subscription management handler
