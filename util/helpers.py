@@ -80,7 +80,7 @@ def get_user_profile(id=None, db_name=None):
         + "/"
         + (db_name if db_name else config["gas"]["AccountsDatabase"])
     )
-
+    
     try:
         # Connect to accounts database and get a cursor
         connection = psycopg2.connect(db_uri)

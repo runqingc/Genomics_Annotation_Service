@@ -16,7 +16,13 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 import shutil
 from datetime import datetime
+import json
 
+# Get configuration
+from configparser import ConfigParser, ExtendedInterpolation
+
+config = ConfigParser(os.environ, interpolation=ExtendedInterpolation())
+config.read("annotator_config.ini")
 
 bucket_name = config.get('s3', 'ResultsBucketName') # Result bucket name
 aws_region = config.get('aws', 'AwsRegionName')
@@ -163,11 +169,13 @@ if __name__ == '__main__':
         
         # sqs notification
         result_notification_data = {
-            "job_id": uuid
+            "user_id": user_name,
+            "job_id": uuid,
+            "complete_time": current_time
         }
 
         # Initialize SNS client
-        sns = boto3.client('sns')
+        sns = boto3.client('sns', region_name=aws_region)
         try:
             response = sns.publish(
                 TopicArn=result_topic_arn,

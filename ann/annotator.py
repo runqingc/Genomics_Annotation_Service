@@ -38,10 +38,6 @@ def receive_sqs_messages(sqs):
     Attempt to read a specified maximum number of messages from the queue using long polling.
 
     :param sqs: the queue to get message from
-    :param max_number: int
-        The maximum number of messages to retrieve in one call.
-    :param wait_time: int
-        The duration (in seconds) the call waits for a message to appear in the queue before returning.
 
     :return: list A list of messages, each represented as a dictionary. Returns an empty list if no messages are
     available or an error occurs.
