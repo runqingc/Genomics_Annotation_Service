@@ -13,12 +13,19 @@ import sys
 import time
 import driver
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 import shutil
 from datetime import datetime
 
-CNetID = 'runqingc'
-bucket_name = 'gas-results'
+
+bucket_name = config.get('s3', 'ResultsBucketName') # Result bucket name
+aws_region = config.get('aws', 'AwsRegionName')
+queue_url = config.get('sqs', 'QueueUrl')
+CNetID = config.get('DEFAULT', 'CnetId')
+annotations_table = config.get('gas', 'AnnotationsTable')
+max_number = int(config.get('sqs', 'MaxMessages'))
+wait_time = int(config.get('sqs', 'WaitTime'))
+result_topic_arn = config.get('sns', 'ResultTopicArn')
 
 """A rudimentary timer for coarse-grained profiling
 """
@@ -114,8 +121,8 @@ if __name__ == '__main__':
         if not remove_directory(os.path.join(f'./anntools/data/{user_name}', uuid)):
             print(f"Error removing the directory")
 
-        dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
-        table = dynamodb.Table('runqingc_annotations')
+        dynamodb = boto3.resource('dynamodb', region_name=aws_region)
+        table = dynamodb.Table(annotations_table)
 
         current_time = datetime.utcnow().isoformat() + 'Z'
 
@@ -134,7 +141,7 @@ if __name__ == '__main__':
                                 job_status = :status
                         """,
                 ExpressionAttributeValues={
-                    ':res_bucket': 'gas-results',
+                    ':res_bucket': bucket_name,
                     ':res_key': prefix + annot_file_name,
                     ':log_key': prefix + log_file_name,
                     ':comp_time': current_time,
@@ -148,9 +155,39 @@ if __name__ == '__main__':
                 print("Conditional check failed:", e.response['Error']['Message'])
             else:
                 print("DynamoDB Client Error:", e.response['Error']['Message'])
+            sys.exit()
         except Exception as e:
             # Catch any other exceptions that may occur
             print("An unexpected error occurred:", str(e))
+            sys.exit()
+        
+        # sqs notification
+        result_notification_data = {
+            "job_id": uuid
+        }
+
+        # Initialize SNS client
+        sns = boto3.client('sns')
+        try:
+            response = sns.publish(
+                TopicArn=result_topic_arn,
+                Message=json.dumps(result_notification_data)
+            )
+            print("Message published successfully:", response)
+        except ClientError as e:
+            # Handle client errors, such as issues with the network or incorrect AWS credentials
+            print("AWS client error occurred:", e)
+            sys.exit()
+        except BotoCoreError as e:
+            # Handle low-level exceptions, such as errors from the underlying HTTP library
+            print("BotoCore error occurred:", e)
+            sys.exit()
+        except Exception as e:
+            # Handle other possible exceptions
+            print("An error occurred:", e)
+            sys.exit()
+
+            
     else:
         print("A valid .vcf file must be provided as input to this program.")
 

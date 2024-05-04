@@ -25,8 +25,8 @@ aws_region = config.get('aws', 'AwsRegionName')
 queue_url = config.get('sqs', 'QueueUrl')
 CNetID = config.get('DEFAULT', 'CnetId')
 annotations_table = config.get('gas', 'AnnotationsTable')
-max_number=int(config.get('sqs', 'MaxMessages'))
-wait_time=int(config.get('sqs', 'WaitTime'))
+max_number = int(config.get('sqs', 'MaxMessages'))
+wait_time = int(config.get('sqs', 'WaitTime'))
 """Reads request messages from SQS and runs AnnTools as a subprocess.
 
 Move existing annotator code here
