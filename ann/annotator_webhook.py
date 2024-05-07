@@ -10,8 +10,16 @@
 ##
 __author__ = "Vas Vasiliadis <vas@uchicago.edu>"
 
+import boto3
+import json
 import requests
+import os
+import sys
+import time
 from flask import Flask, jsonify, request
+from subprocess import Popen, PIPE
+from botocore.exceptions import ClientError, BotoCoreError
+
 
 app = Flask(__name__)
 app.url_map.strict_slashes = False
@@ -21,11 +29,213 @@ environment = "annotator_webhook_config.Config"
 app.config.from_object(environment)
 
 # Connect to SQS and get the message queue
+aws_region = app.config["AWS_REGION_NAME"]
+sqs = boto3.client('sqs', region_name=aws_region)
+queue_url = app.config["AWS_QUEUE_URL"]
+CNetID = app.config["CNET_ID"]
+annotations_table = app.config["AWS_DYNAMODB_ANNOTATIONS_TABLE"]
+max_number = app.config["AWS_SQS_MAX_MESSAGES"]
+wait_time = app.config["AWS_SQS_WAIT_TIME"]
+
+
+def copy_file_from_s3(s3_bucket_name, s3_file_name, local_user_id, local_uuid, local_prefix):
+    """
+    Copies a specified file from an AWS S3 bucket to a local directory, creating the directory if it does not exist.
+
+    :param s3_bucket_name: str
+        The name of the S3 bucket from which to download the file.
+    :param s3_file_name: str
+        The name of the file to download from the S3 bucket.
+    :param local_user_id: str
+        The user identifier used to create a specific subdirectory path under the local basis directory.
+    :param local_uuid: str
+        The UUID associated with the specific job or session, used to create a unique subdirectory for storing the file.
+    :param local_prefix: str
+        The prefix within the S3 bucket under which to search for the file. This helps in filtering the objects list.
+    :return: bool
+        Returns True if the file was successfully downloaded and False otherwise. This includes cases where the file
+        does not exist or other errors occur during the download process.
+    """
+    s3 = boto3.client('s3')
+    local_directory_base = f'./anntools/data/{local_user_id}'
+    # Create unique local directory to preserve the input file
+    local_directory = os.path.join(local_directory_base, local_uuid)
+    try:
+        if not os.path.exists(local_directory):
+            os.makedirs(local_directory)
+    except OSError as e:
+        print(f"Failed to create directory {local_directory}: {e}")
+        return False
+    # List objects in the S3 bucket at the specified prefix
+    # Reference: list_objects_v2
+    # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3/client/list_objects_v2.html
+    try:
+        # List objects in the S3 bucket at the specified prefix
+        s3_response = s3.list_objects_v2(Bucket=s3_bucket_name, Prefix=local_prefix)
+    except ClientError as e:
+        print(f"Error listing objects in bucket {s3_bucket_name} with prefix {local_prefix}: {e}")
+        return False
+
+
+    if 'Contents' in s3_response and len(s3_response['Contents']) > 0:
+        # There's only one file matches, and it starts with the uuid
+        local_file_path = os.path.join(local_directory, s3_file_name.split('~')[-1])
+        print(s3_bucket_name, s3_file_name, local_file_path)
+        try:
+            # Download the file
+            s3.download_file(s3_bucket_name, s3_file_name, local_file_path)
+            print(f"Downloaded {s3_file_name} to {local_file_path}")
+            return True
+        except ClientError as e:
+            # Check if the error was due to the file not being found
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                print(f"File {s3_file_name} not found in bucket {s3_bucket_name}.")
+                return False
+            else:
+                # Other S3 related errors
+                print(f"Failed to download {s3_file_name}: {e}")
+                return False
+        except NotADirectoryError as e:
+            print(f"Target is not a directory: {e}")
+            return False
+        except Exception as e:
+            print(f"An unexpected error occurred: {e}")
+            return False
+    else:
+        print("No files found at the specified prefix.")
+        return False
+
+
+def spawn_annotation_process(local_user_name, local_uuid, local_file_name):
+    """
+    Launches an annotation process as a background subprocess using a specified Python script.
+
+    :param local_user_name: str
+        The identifier for the user under whose directory the file is located.
+    :param local_uuid: str
+        The unique identifier for the job.
+    :param local_file_name: str
+        The name of the file to be processed by the annotation job.
+    :return: bool
+        Returns True if the subprocess was successfully started, False if an error occurred which could be due
+        to file not being found, permission errors, or other unexpected issues.
+
+    """
+    try:
+        # Construct the full path to the local file
+        run_file_path = os.path.join(f'./anntools/data/{local_user_name}', local_uuid, local_file_name.split('~')[-1])
+        # Start the annotation job as a background process
+        Popen(['python', './run.py', run_file_path, local_uuid])
+        print(
+            f"Annotation process started for ./anntools/data/{local_user_name} {run_file_path} {local_uuid}, running run.py.")
+        return True
+    except FileNotFoundError:
+        # Handle the case where the file to execute is not found (e.g., './anntools/run.py' does not exist)
+        print(
+            f"Error: The file './run.py' was not found. Unable to start annotation process for {local_uuid}.")
+        return False
+    except PermissionError:
+        # Handle the case where the Python script cannot be executed due to insufficient permissions
+        print(f"Error: Permission denied when trying to execute './run.py'. Check file permissions.")
+        return False
+    except Exception as e:
+        # Catch all other exceptions that could be raised by subprocess.Popen
+        print(f"An unexpected error occurred while trying to start the annotation process for {local_uuid}: {str(e)}")
+        return False
+
+
+def update_job_status(local_uuid):
+    """
+    Update the job status from pending to running
+
+    :param local_uuid: str
+        The unique identifier for the job.
+    :return: bool
+        True if the database was updated correctly, False otherwise
+    """
+    try:
+        dynamodb = boto3.resource('dynamodb', region_name=aws_region)
+        table = dynamodb.Table(annotations_table)
+        table.update_item(
+            Key={
+                'job_id': local_uuid
+            },
+            UpdateExpression="SET job_status = :new_status",
+            ConditionExpression="job_status = :current_status",
+            ExpressionAttributeValues={
+                ':new_status': 'RUNNING',
+                ':current_status': 'PENDING'
+            },
+            ReturnValues="UPDATED_NEW"
+        )
+        return True
+    except ClientError as e:
+        # Handle common DynamoDB client errors, such as ConditionalCheckFailedException
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            print(f"Condition check failed: Job {local_uuid} is not in PENDING state or doesn't exist.")
+        else:
+            print(f"Failed to update job status for {local_uuid}: {e.response['Error']['Message']}")
+        return False  # Return False to indicate failure, and no response
+
+    except Exception as e:
+        # This catches any other exceptions that might occur
+        print(f"An unexpected error occurred while updating job status for {local_uuid}: {str(e)}")
+        return False
+
+
+def delete_message(local_receipt_handle):
+    """
+    Delete the message after the process spawned successfully
+
+    :param sqs: the queue to delete message from
+    :param local_receipt_handle: the receipt handle extracted from the message
+    :return: True if the message was deleted correctly, False otherwise
+    """
+    # Delete the message from the queue
+    # Reference: Boto 3 documentation receive_message
+    # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/sqs/client/receive_message.html
+    try:
+        sqs.delete_message(
+            QueueUrl=queue_url,
+            ReceiptHandle=local_receipt_handle
+        )
+        return True
+    except ClientError as e:
+        # ClientError caught from boto3 call
+        print(f"Failed to delete the message: {e.response['Error']['Message']}")
+        return False
+    except Exception as e:
+        # General exception catch, if unexpected error occurs
+        print(f"An unexpected error occurred while deleting the message: {str(e)}")
+        return False
+
+
+def handle_requests_queue(data):
+    # Extract user_name, and uuid ect. from the received data
+    user_name = data.get('user_id')
+    uuid = data.get('job_id')
+    bucket_name = data.get('s3_inputs_bucket')
+    prefix_file = data.get('s3_key_input_file')
+    file_name = data.get('input_file_name')
+    prefix = f"{CNetID}/{user_name}/{uuid}"
+
+    # Copy file from s3 bucket to instance
+    if not copy_file_from_s3(bucket_name, prefix_file, user_name, uuid, prefix):
+        return
+
+    # Spawn an Annotate process
+    if not spawn_annotation_process(user_name, uuid, file_name):
+        return
+
+    # Update job status in the dynamodb
+    if not update_job_status(uuid):
+        return
+
+    
 
 
 @app.route("/", methods=["GET"])
 def annotator_webhook():
-
     return ("Annotator webhook; POST job to /process-job-request"), 200
 
 
@@ -40,22 +250,28 @@ Updates the annotations database with the status of the request.
 
 @app.route("/process-job-request", methods=["POST"])
 def annotate():
+    data = json.loads(request.data)
+    # print(data)
+    if data['Type'] == 'SubscriptionConfirmation':
+        # Confirm the subscription by visiting the SubscribeURL
+        response = requests.get(data['SubscribeURL'])
+        print('Processing SubscriptionConfirmation....')
+        if response.status_code == 200:
+            return jsonify({"message": "Subscription confirmed"}), 200
+        else:
+            return jsonify({"error": "Failed to confirm subscription"}), 400
 
-    # Check message type
+    elif data['Type'] == 'Notification':
+        # Directly process the notification message as a job request
+        job_details = json.loads(data['Message'])
+        success = handle_requests_queue(job_details)  
+        # print('job_details:', job_details)
+        if success:
+            return jsonify({"message": "Job request processed successfully"}), 201
+        else:
+            return jsonify({"error": "Failed to process job request"}), 500
 
-    # Confirm SNS topic subscription
-
-    # Process job request
-
-    return (
-        jsonify(
-            {
-                "code": 201,
-                "message": "Annotation job request processed."
-            }
-        ),
-        201,
-    )
+    return jsonify({"error": "Invalid message type"}), 400
 
 
 ### EOF

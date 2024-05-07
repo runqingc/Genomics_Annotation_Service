@@ -153,12 +153,12 @@ class Config(object):
 
     # AWS SNS topics
     AWS_SNS_JOB_REQUEST_TOPIC = (
-        f"arn:aws:sns:us-east-1:127134666975:{iam_username}_a12_job_requests"
+        f"arn:aws:sns:us-east-1:127134666975:{iam_username}_a13_job_requests"
     )
 
 
     # AWS SQS queues
-    AWS_SQS_REQUESTS_QUEUE_NAME = "runqingc_a12_job_requests"
+    AWS_SQS_REQUESTS_QUEUE_NAME = "runqingc_a13_job_requests"
 
     # AWS DynamoDB table
     AWS_DYNAMODB_ANNOTATIONS_TABLE = f"{iam_username}_annotations"
