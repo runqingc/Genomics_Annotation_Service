@@ -41,7 +41,7 @@ vault_name = app.config['AWS_VAULT_NAME']
 annotations_table = app.config['AWS_DYNAMODB_ANNOTATIONS_TABLE']
 
 def download_from_s3(bucket_name, file_key):
-
+    # Download the result file from s3 result bucket into instance
     local_directory = os.path.dirname(file_key)
     try:
         if not os.path.exists(local_directory):
@@ -72,6 +72,7 @@ def download_from_s3(bucket_name, file_key):
 
 
 def upload_to_glacier_vault(file_path):
+    # Upload file to glacier vault
     glacier = boto3.client('glacier', region_name=aws_region)
     try:
         with open(file_path, 'rb') as file:
@@ -93,20 +94,35 @@ def upload_to_glacier_vault(file_path):
 
 
 def delete_from_s3(bucket_name, file_key):
-    s3 = boto3.client('s3')
-    s3.delete_object(Bucket=bucket_name, Key=file_key)
-    print(f"Deleted {file_key} from S3 bucket {bucket_name}")
-    return True
-
+    # Delete file from S3 bucket
+    try:
+        s3 = boto3.client('s3')
+        s3.delete_object(Bucket=bucket_name, Key=file_key)
+        print(f"Deleted {file_key} from S3 bucket {bucket_name}")
+        return True
+    except ClientError as e:
+        # This will catch client-side issues such as incorrect access permissions, non-existent bucket, etc.
+        print(f"Client error when trying to delete from S3: {e}")
+        return False
+    except Exception as e:
+        # This is a catch-all for any other exceptions that might be raised.
+        print(f"Unexpected error: {e}")
+        return False
 
 def delete_local_file(file_key):
-    local_directory = os.path.dirname(file_key)
-    shutil.rmtree(local_directory)
-    print(f"Deleted local directory {local_directory}") 
-    return True
+    # Delete file from local instance
+    try:
+        local_directory = os.path.dirname(file_key)
+        shutil.rmtree(local_directory)
+        print(f"Deleted local directory {local_directory}")
+        return True
+    except (OSError, shutil.Error) as e:
+        print(f"Failed to delete local directory: {e}")
+        return False
 
 
 def update_dynamodb(job_id, archive_id):
+    # Update the database to include the archive_id
     dynamodb = boto3.resource('dynamodb', region_name=aws_region)
     table = dynamodb.Table(annotations_table)
     # Reference: Update item
@@ -153,15 +169,12 @@ def archive_free_user_data():
             return jsonify({"error": "Failed to confirm subscription"}), 400
     elif data['Type'] == 'Notification':
         
-        # ADD IF STATEMENT
-        
         archive_details = json.loads(data['Message'])
 
         s3_key_result_file = archive_details.get('s3_key_result_file')
         job_id = archive_details.get('job_id')
         user_id = archive_details.get('user_id')
 
-        
         profile = helpers.get_user_profile(user_id, accounts_database)
         print('profile:', profile)
 
