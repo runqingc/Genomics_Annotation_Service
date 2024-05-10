@@ -164,10 +164,7 @@ def create_annotation_job_request():
             "s3_inputs_bucket": bucket_name,
             "s3_key_input_file": s3_key,
             "submit_time": submit_time,
-            "job_status": "PENDING",
-            "user_name": session['name'],
-            "user_email": session['email'],
-            "user_role": session['role']
+            "job_status": "PENDING"
             }
 
     # Initialize a boto3 client
@@ -340,7 +337,13 @@ def annotation_details(id):
     request_time = format_time(job_detail['submit_time'])
     vcf_input_file = job_detail['input_file_name']
     status = job_detail['job_status']
+    
+    
     complete_time = 'N/A'
+    results_file_archive_id = 'N/A'
+    if 'results_file_archive_id' in job_detail:
+        results_file_archive_id = job_detail['results_file_archive_id']
+    print('HERE!!!!!!  results_file_archive_id: ', results_file_archive_id)
     result_file_download_url = ''
     log_file_view_url = ''
     # Generate unique ID to be used as S3 key (name)
@@ -375,7 +378,8 @@ def annotation_details(id):
                            complete_time=complete_time,
                            input_file_download_url=input_file_download_url,
                            result_file_download_url=result_file_download_url,
-                           log_file_view_url=log_file_view_url
+                           log_file_view_url=log_file_view_url,
+                           results_file_archive_id=results_file_archive_id
                            )
 
 

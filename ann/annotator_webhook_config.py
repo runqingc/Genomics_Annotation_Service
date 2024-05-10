@@ -43,10 +43,10 @@ class Config(object):
     AWS_S3_RESULTS_BUCKET = "gas-results"
 
     # AWS SNS topics
-    AWS_SNS_TOPIC = f"arn:aws:sns:us-east-1:127134666975:{iam_username}_a13_job_requests"
+    AWS_SNS_TOPIC = f"arn:aws:sns:us-east-1:127134666975:{iam_username}_a14_job_requests"
 
     # AWS SQS queues
-    AWS_QUEUE_URL = f"https://sqs.us-east-1.amazonaws.com/127134666975/{iam_username}_a13_job_requests"
+    AWS_QUEUE_URL = f"https://sqs.us-east-1.amazonaws.com/127134666975/{iam_username}_a14_job_requests"
     AWS_SQS_WAIT_TIME = 20
     AWS_SQS_MAX_MESSAGES = 10
 

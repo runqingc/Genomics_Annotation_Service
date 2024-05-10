@@ -48,10 +48,18 @@ University of Chicago
 
         {% if status == 'COMPLETED' %}
         <table class="table">
+            {% if results_file_archive_id == 'N/A' %}
             <tr>
-                <th>Annotated Results File: </th>
-                <td><a href="{{ result_file_download_url }}" download>download</a></td>
+                <th>Annotated Results File:</th>
+                <td><a href="{{ result_file_download_url }}" download>Download</a></td>
             </tr>
+            {% else %}
+            <tr>
+                <th>Annotated Results File:</th>
+                <td><a href="{{ url_for('make_me_premium') }}">Upgrade to Premium for Download</a></td>
+            </tr>
+            {% endif %}
+            
             <tr>
                 <th>Annotated Log File: </th>
                 <td><a href="{{ log_file_view_url }}">view</a></td>

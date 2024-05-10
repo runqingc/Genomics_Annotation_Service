@@ -1,4 +1,4 @@
-# archive_app_config.py
+    # archive_app_config.py
 #
 # Copyright (C) 2015-2023 Vas Vasiliadis
 # University of Chicago
@@ -31,6 +31,10 @@ class Config(object):
 
     # AWS DynamoDB table
     AWS_DYNAMODB_ANNOTATIONS_TABLE = f"{iam_username}_annotations"
+
+    AWS_S3_BUCKET_NAME = "gas-results"
+
+    AWS_VAULT_NAME = "ucmpcs"
 
 
 ### EOF

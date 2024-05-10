@@ -156,6 +156,7 @@ def update_job_status(local_uuid):
     try:
         dynamodb = boto3.resource('dynamodb', region_name=aws_region)
         table = dynamodb.Table(annotations_table)
+
         table.update_item(
             Key={
                 'job_id': local_uuid
@@ -172,7 +173,7 @@ def update_job_status(local_uuid):
     except ClientError as e:
         # Handle common DynamoDB client errors, such as ConditionalCheckFailedException
         if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
-            print(f"Condition check failed: Job {local_uuid} is not in PENDING state or doesn't exist.")
+            print(f"Condition check failed in ann_webhook: Job {local_uuid} is not in PENDING state or doesn't exist.")
         else:
             print(f"Failed to update job status for {local_uuid}: {e.response['Error']['Message']}")
         return False  # Return False to indicate failure, and no response
@@ -221,15 +222,17 @@ def handle_requests_queue(data):
 
     # Copy file from s3 bucket to instance
     if not copy_file_from_s3(bucket_name, prefix_file, user_name, uuid, prefix):
-        return
+        return False
 
     # Spawn an Annotate process
     if not spawn_annotation_process(user_name, uuid, file_name):
-        return
+        return False
 
     # Update job status in the dynamodb
     if not update_job_status(uuid):
-        return
+        return False
+
+    return True  
 
     
 
@@ -251,7 +254,6 @@ Updates the annotations database with the status of the request.
 @app.route("/process-job-request", methods=["POST"])
 def annotate():
     data = json.loads(request.data)
-    # print(data)
     if data['Type'] == 'SubscriptionConfirmation':
         # Confirm the subscription by visiting the SubscribeURL
         response = requests.get(data['SubscribeURL'])
@@ -264,9 +266,9 @@ def annotate():
     elif data['Type'] == 'Notification':
         # Directly process the notification message as a job request
         job_details = json.loads(data['Message'])
-        success = handle_requests_queue(job_details)  
-        # print('job_details:', job_details)
+        success = handle_requests_queue(job_details) 
         if success:
+            # print("SUCCESS")
             return jsonify({"message": "Job request processed successfully"}), 201
         else:
             return jsonify({"error": "Failed to process job request"}), 500

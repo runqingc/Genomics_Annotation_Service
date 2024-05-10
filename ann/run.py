@@ -32,6 +32,7 @@ annotations_table = config.get('gas', 'AnnotationsTable')
 max_number = int(config.get('sqs', 'MaxMessages'))
 wait_time = int(config.get('sqs', 'WaitTime'))
 result_topic_arn = config.get('sns', 'ResultTopicArn')
+state_machine_arn = config.get('state', 'StateMachineArn')
 
 """A rudimentary timer for coarse-grained profiling
 """
@@ -104,6 +105,24 @@ def upload_file(local_file_path, s3_file_path):
         return False
 
 
+def start_state_machine(data):
+    client = boto3.client('stepfunctions', region_name=aws_region)
+    # Reference: start_execution
+    # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/stepfunctions/client/start_execution.html
+    try:
+        response = client.start_execution(
+            stateMachineArn=state_machine_arn,
+            input=json.dumps(data)
+        )
+    except ClientError as e:
+        print("AWS client error occurred:", e)
+    except Exception as e:
+        print("An unexpected error occurred:", e)        
+    print("State machine started:", response['executionArn'])
+
+
+
+
 if __name__ == '__main__':
     # Call the AnnTools pipeline
     if len(sys.argv) > 1:
@@ -158,7 +177,7 @@ if __name__ == '__main__':
         except ClientError as e:
             error_code = e.response['Error']['Code']
             if error_code == 'ConditionalCheckFailedException':
-                print("Conditional check failed:", e.response['Error']['Message'])
+                print("Conditional check failed in run.py:", e.response['Error']['Message'])
             else:
                 print("DynamoDB Client Error:", e.response['Error']['Message'])
             sys.exit()
@@ -194,6 +213,17 @@ if __name__ == '__main__':
             # Handle other possible exceptions
             print("An error occurred:", e)
             sys.exit()
+
+            
+            
+        archive_notification_data = {
+            "user_id": user_name,
+            "job_id": uuid,
+            "s3_key_result_file": prefix + annot_file_name,
+            
+        }   
+        
+        start_state_machine(archive_notification_data)
 
             
     else:
