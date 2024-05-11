@@ -12,6 +12,8 @@ University of Chicago
 
     {% include "header.html" %}
 
+
+
     <div class="container">
     
         <div class="page-header">
@@ -46,9 +48,50 @@ University of Chicago
         </div>
 
         <script>
-        // Add JS code to prevent input files larger than 150K for free users
-        // Add JS code to disable submit button if file is not selected
+        // Reference: EventTarget: addEventListener() method
+        // https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/addEventListener   
+        document.addEventListener('DOMContentLoaded', function() {
+            const annotateButton = document.getElementById('annotateButton');
+            const uploadFileInput = document.getElementById('upload-file');
+            const fileForm = document.querySelector('form'); // Select the form
+            const role = "{{ role }}";
+
+            // Initially disable the annotate button until a file is selected
+            // Reference: HTML attribute: disabled
+            // https://developer.mozilla.org/en-US/docs/Web/HTML/Attributes/disabled
+            annotateButton.disabled = true;
+
+            // Event listener for file input
+            uploadFileInput.addEventListener('change', function() {
+                const file = uploadFileInput.files[0];
+                if (file) {
+                    // Reference: Document: querySelector() method
+                    // https://developer.mozilla.org/en-US/docs/Web/API/Document/querySelector
+                    document.querySelector('.form-control').value = file.name;
+
+                    // Check if the user is a free user and the file size is greater than 150KB
+                    if (role === 'free_user' && file.size > 150 * 1024) {
+                        alert('Free users cannot upload files larger than 150KB. Please subscribe for premium access.');
+                        annotateButton.disabled = true; // Keep the button disabled
+                    } else {
+                        annotateButton.disabled = false; // Enable the button if file size is okay
+                    }
+                } else {
+                    annotateButton.disabled = true; // Disable button if no file is selected
+                }
+            });
+
+            // Add event listener to the form to prevent submission if conditions are not met
+            fileForm.addEventListener('submit', function(event) {
+                const file = uploadFileInput.files[0];
+                if (file && role === 'free_user' && file.size > 150 * 1024) {
+                    event.preventDefault(); // Prevent form submission
+                    alert('Your file cannot be uploaded as it exceeds the size limit for free users.');
+                }
+            });
+        });
         </script>
+
     
     </div> <!-- container -->
 

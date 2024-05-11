@@ -483,6 +483,7 @@ def annotation_log(id):
 """Subscription management handler
 """
 import stripe
+from stripe.error import StripeError, CardError
 from auth import update_profile
 
 
@@ -490,28 +491,61 @@ from auth import update_profile
 @authenticated
 def subscribe():
     if request.method == "GET":
-        # Display form to get subscriber credit card info
-
-        # If A15 not completed, force-upgrade user role and initiate restoration
-        pass
+        return render_template('subscribe.html')
 
     elif request.method == "POST":
         # Process the subscription request
 
-        # Create a customer on Stripe
+        stripe_token = request.form['stripe_token']
+        user_name = session['name']
+        user_email = session['email']
+        price_id = app.config["STRIPE_PRICE_ID"]
+        stripe.api_key = app.config["STRIPE_SECRET_KEY"]
+        # Reference: Create a customer
+        # https://docs.stripe.com/api/customers/create
+        try:
+            customer = stripe.Customer.create(
+                email=user_email,
+                name=user_name,
+                source=stripe_token 
+            )
+        except stripe.error.StripeError as e:
+            # Handle error
+            app.logger.error(f"StripeError in /subscribe: {str(e)}")
+            return abort(500)  # Internal server error
 
         # Subscribe customer to pricing plan
+        # Reference: Create a subscription
+        # https://docs.stripe.com/api/subscriptions/create
+        try:
+            subscription = stripe.Subscription.create(
+                    customer=customer.id,
+                    items=[{'price': price_id}], 
+                )
+        except stripe.error.CardError as e:
+            body = e.json_body
+            err = body.get('error', {})
+            return jsonify({"status": "error", "message": err.get('message')}), 400
+        except stripe.error.StripeError as e:
+            return jsonify({"status": "error", "message": "Internal Stripe error"}), 500 
+        except Exception as e:
+            # Something else happened, completely unrelated to Stripe
+            return jsonify({"status": "error", "message": "An error occurred, please try again"}), 500       
 
         # Update user role in accounts database
+        update_profile(identity_id=session["primary_identity"], role="premium_user")
 
-        # Update role in the session
 
-        # Request restoration of the user's data from Glacier
-        # ...add code here to initiate restoration of archived user data
-        # ...and make sure you handle files pending archive!
+        # # Update role in the session
+        session['role'] = 'premium_user'
 
-        # Display confirmation page
-        pass
+        # # Request restoration of the user's data from Glacier
+        # # ...add code here to initiate restoration of archived user data
+        # # ...and make sure you handle files pending archive!
+
+        # # Display confirmation page
+        return render_template('subscribe_confirm.html', stripe_id=customer.id)
+        
 
 
 """DO NOT CHANGE CODE BELOW THIS LINE
