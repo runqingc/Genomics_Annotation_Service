@@ -40,35 +40,6 @@ s3_result_bucket_name = app.config['AWS_S3_BUCKET_NAME']
 vault_name = app.config['AWS_VAULT_NAME']
 annotations_table = app.config['AWS_DYNAMODB_ANNOTATIONS_TABLE']
 
-def download_from_s3(bucket_name, file_key):
-    # Download the result file from s3 result bucket into instance
-    local_directory = os.path.dirname(file_key)
-    try:
-        if not os.path.exists(local_directory):
-            os.makedirs(local_directory)
-    except OSError as e:
-        print(f"Failed to create directory {local_directory}: {e}")
-        return False
-
-    s3 = boto3.client('s3')
-
-    try:
-        s3.download_file(bucket_name, file_key, file_key)
-        print(f"In archive_app: Downloaded {file_key} to {file_key}")
-        return True
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'NoSuchKey':
-            print(f"File {file_key} not found in bucket {bucket_name}.")
-            return False
-        else:
-            print(f"Failed to download {file_key}: {e}")
-            return False
-    except NotADirectoryError as e:
-        print(f"Target is not a directory: {e}")
-        return False
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-        return False 
 
 
 def upload_to_glacier_vault(file_path):
@@ -109,16 +80,6 @@ def delete_from_s3(bucket_name, file_key):
         print(f"Unexpected error: {e}")
         return False
 
-def delete_local_file(file_key):
-    # Delete file from local instance
-    try:
-        local_directory = os.path.dirname(file_key)
-        shutil.rmtree(local_directory)
-        print(f"Deleted local directory {local_directory}")
-        return True
-    except (OSError, shutil.Error) as e:
-        print(f"Failed to delete local directory: {e}")
-        return False
 
 
 def update_dynamodb(job_id, archive_id):
@@ -131,11 +92,11 @@ def update_dynamodb(job_id, archive_id):
         # Update item in DynamoDB table
         response = table.update_item(
             Key={
-                'job_id': job_id  # Make sure 'job_id' is the correct partition key
+                'job_id': job_id  
             },
             UpdateExpression="SET results_file_archive_id = :archive_id",
             ExpressionAttributeValues={
-                ':archive_id': archive_id  # The key should start with ':'
+                ':archive_id': archive_id  
             },
             ReturnValues="UPDATED_NEW"
         )
@@ -148,6 +109,24 @@ def update_dynamodb(job_id, archive_id):
         # General exception handling
         print("An unexpected error occurred:", str(e))
         return False
+
+
+def move_to_glacier(bucket_name, file_key):
+    s3 = boto3.client('s3')
+    glacier = boto3.client('glacier', region_name=aws_region)
+    response = s3.get_object(Bucket=bucket_name, Key=file_key)
+    data = response['Body'].read()
+    try:
+        glacier_response = glacier.upload_archive(
+            vaultName=vault_name,
+            body=data,
+            )
+        archive_id = glacier_response['archiveId']
+        return archive_id
+    except ClientError as e:
+        print(f"An errored when archiving to Glacier: {e}")
+        return None
+
 
 
 
@@ -184,13 +163,10 @@ def archive_free_user_data():
         
         print("Free_user, archiving....")
         # MOVE FROM S3 To GLACIER
-        
-        # Down load file from s3
-        if not download_from_s3(s3_result_bucket_name, s3_key_result_file):
-            return jsonify({"error": "In archive_app.py failed to down load file from s3"}), 400
+
         
         # Upload the file to glacier
-        archive_id = upload_to_glacier_vault(s3_key_result_file)
+        archive_id = move_to_glacier(s3_result_bucket_name, s3_key_result_file)
         if archive_id is None:
             return jsonify({"error": "In archive_app.py failed to upload the file to glacier"}), 400
         
@@ -198,9 +174,6 @@ def archive_free_user_data():
         if not delete_from_s3(s3_result_bucket_name, s3_key_result_file):
             return jsonify({"error": "In archive_app.py failed to delete file from s3"}), 400
 
-        # remove file from local instance
-        if not delete_local_file(s3_key_result_file):
-            return jsonify({"error": "In archive_app.py failed to delete file from local instance"}), 400
 
         # Update database
         if not update_dynamodb(job_id, archive_id):

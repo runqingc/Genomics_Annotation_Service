@@ -31,8 +31,11 @@ class Config(object):
 
     # AWS DynamoDB table
     AWS_DYNAMODB_ANNOTATIONS_TABLE = f"{iam_username}_annotations"
+    AWS_DYNAMODB_ANNOTATIONS_TABLE_USER_INDEX = "user_id_index"
 
     # AWS Glacier
     AWS_GLACIER_VAULT = "ucmpcs"
+
+    AWS_RESTORE_REQUEST_SNS = "arn:aws:sns:us-east-1:127134666975:runqingc_a16_restore_requests"
 
 ### EOF
