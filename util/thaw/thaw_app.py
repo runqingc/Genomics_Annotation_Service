@@ -70,6 +70,8 @@ def initiate_glacier_retrieval(job_id, archive_id):
     glacier_client = boto3.client('glacier', region_name=aws_region)
     thaw_job_id = ''
     # Try Expedited retrieval first
+    # Reference: initiate_job
+    # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/glacier/client/initiate_job.html
     try:
         response = glacier_client.initiate_job(
             vaultName=vault_name,
@@ -90,6 +92,8 @@ def initiate_glacier_retrieval(job_id, archive_id):
         if e.response['Error']['Code'] == 'InsufficientCapacityException':
             print("Expedited retrieval failed due to insufficient capacity. Trying standard retrieval...")
             # Fall back to Standard retrieval
+            # Reference: initiate_job
+            # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/glacier/client/initiate_job.html
             try:
                 response = glacier_client.initiate_job(
                     vaultName=vault_name,
@@ -135,7 +139,7 @@ def thaw_premium_user_data():
         thaw_details = json.loads(data['Message'])
         job_id = thaw_details.get('job_id')
         archive_id = thaw_details.get('archive_id')
-
+        # initiate the glacier retrieval
         thaw_job_id = initiate_glacier_retrieval(job_id, archive_id) 
         if thaw_job_id=='':
             return jsonify({"error": "Failed to initiate thawing process"}), 400

@@ -66,6 +66,8 @@ def upload_to_glacier_vault(file_path):
 
 def delete_from_s3(bucket_name, file_key):
     # Delete file from S3 bucket
+    # Reference: delete objects
+    # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3/client/delete_object.html
     try:
         s3 = boto3.client('s3')
         s3.delete_object(Bucket=bucket_name, Key=file_key)
@@ -114,8 +116,16 @@ def update_dynamodb(job_id, archive_id):
 def move_to_glacier(bucket_name, file_key):
     s3 = boto3.client('s3')
     glacier = boto3.client('glacier', region_name=aws_region)
-    response = s3.get_object(Bucket=bucket_name, Key=file_key)
-    data = response['Body'].read()
+    # Reference: get_object
+    # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3/client/get_object.html
+    try:
+        response = s3.get_object(Bucket=bucket_name, Key=file_key)
+        data = response['Body'].read()
+    except ClientError as e:
+        print(f"An error occurred: {e.response['Error']['Message']}")
+        return None
+    # Reference: upload_archive
+    # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/glacier/client/upload_archive.html
     try:
         glacier_response = glacier.upload_archive(
             vaultName=vault_name,

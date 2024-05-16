@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 import boto3
 from botocore.client import Config
 from boto3.dynamodb.conditions import Key
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, ParamValidationError, EndpointConnectionError, BotoCoreError
 
 from flask import abort, flash, redirect, render_template, request, session, url_for, jsonify
 
@@ -193,7 +193,6 @@ def create_annotation_job_request():
     # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/sns.html
     sns = boto3.client('sns', region_name=app.config["AWS_REGION_NAME"])
     topic_arn = app.config["AWS_SNS_JOB_REQUEST_TOPIC"]
-    print(topic_arn)
     # Reference: sns publish
     # From AWS boto3 documentation - publish
     # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/sns/client/publish.html
@@ -337,13 +336,13 @@ def annotation_details(id):
     request_time = format_time(job_detail['submit_time'])
     vcf_input_file = job_detail['input_file_name']
     status = job_detail['job_status']
-    
+    file_restore_status = job_detail.get('file_restore_status')
     
     complete_time = 'N/A'
     results_file_archive_id = 'N/A'
     if 'results_file_archive_id' in job_detail:
         results_file_archive_id = job_detail['results_file_archive_id']
-    print('HERE!!!!!!  results_file_archive_id: ', results_file_archive_id)
+    
     result_file_download_url = ''
     log_file_view_url = ''
     # Generate unique ID to be used as S3 key (name)
@@ -379,7 +378,8 @@ def annotation_details(id):
                            input_file_download_url=input_file_download_url,
                            result_file_download_url=result_file_download_url,
                            log_file_view_url=log_file_view_url,
-                           results_file_archive_id=results_file_archive_id
+                           results_file_archive_id=results_file_archive_id,
+                           file_restore_status=file_restore_status
                            )
 
 
@@ -464,14 +464,8 @@ def annotation_log(id):
     except EndpointConnectionError as e:
         app.logger.error(f"Endpoint Connection Error: {str(e)}")
         return abort(500)  # Internal server error
-    except NoCredentialsError as e:
-        app.logger.error("No credentials to access AWS services.")
-        return abort(500)  # Internal server error
     except BotoCoreError as e:
         app.logger.error(f"BotoCore Error: {str(e)}")
-        return abort(500)  # Internal server error
-    except HTTPError as e:
-        app.logger.error(f"HTTP Error: {str(e)}")
         return abort(500)  # Internal server error
     except Exception as e:
         app.logger.error(f"Unknown Error: {str(e)}")
@@ -485,6 +479,44 @@ def annotation_log(id):
 import stripe
 from stripe.error import StripeError, CardError
 from auth import update_profile
+
+def get_user_archive_jobs(user_id):
+    """
+        Given a user_id, return all tuples of (job_id, archive_id) from DynamoDB
+    """
+    # Create a DynamoDB resource using boto3
+    dynamodb = boto3.resource('dynamodb', region_name=app.config["AWS_REGION_NAME"])
+    # Specify the table name
+    table = dynamodb.Table(app.config["AWS_DYNAMODB_ANNOTATIONS_TABLE"])
+
+    # Query the table using the index
+    try:
+        response = table.query(
+            IndexName=app.config["AWS_DYNAMODB_ANNOTATIONS_TABLE_USER_INDEX"],
+            KeyConditionExpression=boto3.dynamodb.conditions.Key('user_id').eq(user_id)
+        )
+
+        # Collect all tuples of (job_id, archive_id) from the query response
+        archive_jobs = [
+            (item['job_id'], item['results_file_archive_id']) for item in response['Items']
+            if 'job_id' in item and 'results_file_archive_id' in item
+        ]
+
+        return archive_jobs
+
+        return results_file_archive_ids
+    except ClientError as e:
+        # Handle common client errors from the service side (e.g., table not found)
+        print(f"An error occurred: {e.response['Error']['Message']}")
+        return []
+    except ParamValidationError as e:
+        # Handle errors due to the incorrect parameters
+        print(f"Parameter validation error: {e}")
+        return []
+    except Exception as e:
+        # Handle other possible exceptions
+        print(f"An unexpected error occurred: {e}")   
+        return []
 
 
 @app.route("/subscribe", methods=["GET", "POST"])
@@ -542,6 +574,51 @@ def subscribe():
         # # Request restoration of the user's data from Glacier
         # # ...add code here to initiate restoration of archived user data
         # # ...and make sure you handle files pending archive!
+        # Send message to request queue
+        # Create an SNS client
+        # Reference: SNS Client
+        # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/sns.html
+        sns = boto3.client('sns', region_name=app.config["AWS_REGION_NAME"])
+        topic_arn = app.config["AWS_SNS_THAW_REQUEST_TOPIC"]
+        user_id = session['primary_identity']
+
+        archive_jobs = get_user_archive_jobs(user_id)
+
+        for job_id, archive_id in archive_jobs:
+            data = {
+                    "job_id": job_id,
+                    "archive_id": archive_id
+            }
+            # Reference: sns publish
+            # From AWS boto3 documentation - publish
+            # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/sns/client/publish.html
+            try:
+                response = sns.publish(
+                    TopicArn=topic_arn,
+                    Message=json.dumps(data)
+                )
+                print(response)
+            except ClientError as e:
+                # Handle client-side or server-side error from AWS
+                app.logger.error(f"ClientError in SNS operation: {e.response['Error']['Message']}")
+                return abort(500)  # Use abort to trigger the 500 error handler
+            except ParamValidationError as e:
+                # Handle parameter validation errors
+                app.logger.error(f"Parameter Validation Error: {str(e)}")
+                return abort(400)  # Use abort to trigger the 400 error handler
+            except EndpointConnectionError as e:
+                # Handle connection errors
+                app.logger.error(f"Endpoint Connection Error: {str(e)}")
+                return abort(500)  # Use abort to trigger the 500 error handler
+            except BotoCoreError as e:
+                # Handle errors from the core Boto3 library
+                app.logger.error(f"BotoCore Error: {str(e)}")
+                return abort(500)  # Use abort for 500 errors
+            except Exception as e:
+                # Generic handler for any other exceptions
+                app.logger.error(f"Unknown Error: {str(e)}")
+                return abort(500)  # Use abort for 500 errors
+
 
         # # Display confirmation page
         return render_template('subscribe_confirm.html', stripe_id=customer.id)

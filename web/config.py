@@ -153,15 +153,19 @@ class Config(object):
 
     # AWS SNS topics
     AWS_SNS_JOB_REQUEST_TOPIC = (
-        f"arn:aws:sns:us-east-1:127134666975:{iam_username}_a15_job_requests"
+        f"arn:aws:sns:us-east-1:127134666975:{iam_username}_a16_job_requests"
     )
-
+    AWS_SNS_THAW_REQUEST_TOPIC = (
+        f"arn:aws:sns:us-east-1:127134666975:{iam_username}_a16_thaw_requests"
+    )
 
     # AWS SQS queues
     AWS_SQS_REQUESTS_QUEUE_NAME = "runqingc_a15_job_requests"
 
     # AWS DynamoDB table
     AWS_DYNAMODB_ANNOTATIONS_TABLE = f"{iam_username}_annotations"
+    AWS_DYNAMODB_ANNOTATIONS_TABLE_USER_INDEX = "user_id_index"
+    
 
     # Use this email address to send email via SES
     MAIL_DEFAULT_SENDER = f"{iam_username}@ucmpcs.org"

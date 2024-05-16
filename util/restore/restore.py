@@ -24,13 +24,15 @@ glacier_client = boto3.client('glacier', region_name=AWS_REGION_NAME)
 
 
 def find_s3_result_key(dynamodb, job_id):
-
+    # Find the s3_result_key based on job_id
     primary_key = {'job_id': {'S': job_id}}
+    # Reference: get_item
+    # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/dynamodb/table/get_item.html
     try:
         response = dynamodb.get_item(TableName=DYNAMODB_TABLE, Key=primary_key)
         item = response.get('Item')
         if item:
-            s3_key_result_file = item.get('s3_key_result_file', {}).get('S')  # Assuming it's a string ('S')
+            s3_key_result_file = item.get('s3_key_result_file', {}).get('S') 
             print("s3_key_result_file:", s3_key_result_file)
             return s3_key_result_file 
         else:
@@ -45,6 +47,9 @@ def find_s3_result_key(dynamodb, job_id):
  
 
 def delete_message(sqs_client, receipt_handle):
+    # delete a message
+    # Reference: delete_message
+    # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/sqs/client/delete_message.html
     try:
         sqs_client.delete_message(
                 QueueUrl=RESTORE_QUEUE_URL,
@@ -60,6 +65,9 @@ def delete_message(sqs_client, receipt_handle):
 
 
 def copy_to_s3(thaw_job_id, s3_key_result_file):
+    # copy the s3 file to its original position
+    # Reference: get_job_output
+    # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/glacier/client/get_job_output.html
     try:
         # Initiate the job to get the output
         response = glacier_client.get_job_output(
@@ -87,6 +95,9 @@ def copy_to_s3(thaw_job_id, s3_key_result_file):
 
 
 def delete_glacier_archive(archive_id):
+    # delete the archived file from glacier, given the archive_id
+    # Reference: delete_archive
+    # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/glacier/client/delete_archive.html
     try:
         response = glacier_client.delete_archive(
             vaultName=AWS_GLACIER_VAULT,
@@ -103,6 +114,9 @@ def delete_glacier_archive(archive_id):
 
 
 def delete_dynamodb_fields(dynamodb_client, job_id):
+    # delete the results_file_archive_id and file_restore_status fields to indicate the job complete
+    # Reference: update_item
+    # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/dynamodb/client/update_item.html
     try:
         response = dynamodb_client.update_item(
             TableName=DYNAMODB_TABLE,
@@ -140,6 +154,7 @@ def lambda_handler(event, context):
         print(f'Archive ID: {archive_id}')
         print(f'Job Description: {job_id}')
 
+        # Find the s3_key_result_file of given job_id in dynamodb
         s3_key_result_file = find_s3_result_key(dynamodb, job_id)
         if s3_key_result_file == '':
             continue
@@ -153,9 +168,11 @@ def lambda_handler(event, context):
         if delete_message(sqs_client, receipt_handle) == False:
             continue
         
+        # delete the glacier archive file
         if delete_glacier_archive(archive_id) == False:
             continue
-
+        
+        # update the dynamodb to indicate the job finish
         if delete_dynamodb_fields(dynamodb, job_id) == False:
             continue    
 

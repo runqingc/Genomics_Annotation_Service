@@ -8,36 +8,52 @@ Directory contents are as follows:
 * `/aws` - AWS user data files
 
 
-### Approach
-
-The data flow now looks like this:
-
-​	User log in and submit the annotation file. In views.py I send a notification to the job_request sns topic.
-
-​	The "/process-job-request" in annotator_webhook subscribs to the sns topic, so once the message was published to that topic, the "/process-job-request" will receive a post request and triggers the annotation process (spawn a process calling run.py).
-
-​	Inside run.py, I include a state machine. One the annotation process is done, it will starts executing, waiting for 3 minutes and push a message to archive sns topic. The message include user_id, job_id and s3_key_result_file.
-
-​	Inside archive_app.py I have an end point "/archive" that subscribs to the archive sns topic, so once the message was published to that topic, the "/archive" will be triggered. 
-
-​	The "/archive" endpoint first extract user information from the account database, returning the user profile. (This step is done with the helper function "get_user_profile" defined in /util/helpers )  It then extract the user_role to decide if the user is a free user. If it does, it will remove the file from s3 and upload it to glacier vault. By this way I will be able to handle the situation when a user becomes a premuim on after he/she submit the annotaiton job, the result file will now not be put the glacier once the process completes. 
 
 
 
-### Rationale
+### A16 Write Up
 
-**Scalability**
+![Data Restore Flowchart](./Data_Restore.png)
 
-​	By using AWS SNS to facilitate communication between different components of the system, each component operates independently. This means that scaling any part of the system (e.g., increasing the number of workers in `run.py` for processing or handling more requests at the `/archive` endpoint) can be done without impacting other components. This is crucial for handling varying loads, ensuring that the system can handle growth in user numbers or data volume efficiently.
+### Data Restoring Implementation
 
-​	Utilizing AWS Step Functions to manage the annotation and archiving processes ensures that the workflow is clearly defined and each step is decoupled from others. Step Functions scale seamlessly with increasing demand, managing state transitions and retries automatically, which offloads complexity from the application, making it easier to scale.
+First, the user upgrades to a premium subscription using the `/subscribe` endpoint in `views.py`. This endpoint retrieves the `user_id` from the session, searches for all archived jobs in DynamoDB associated with that `user_id`, and sends their `job_id` and `archive_id` to the `/thaw` endpoint.
 
-​	The asynchronous nature of SNS and the state machine ensures that the system can handle high throughput and latency variability effectively. Long-running processes like annotation and archival do not block user interactions or other system processes.
+The `/thaw` endpoint, which listens on `http://runqingc-a16-thaw.ucmpcs.org:5002/thaw`, handles the initial step of retrieving an object by making it available for download. Upon receiving a thawing request, it first attempts an expedited retrieval by calling `initiate_job` and setting the 'Tier' to 'Expedited'. If this fails due to an `InsufficientCapacityException`, it falls back to the Standard retrieval approach.
 
-**Consistency**
+The 'Description' field is set to the `job_id`, which is the primary key in my DynamoDB table, allowing quick and efficient retrieval of related information from the database.
 
-​	Using AWS Step Functions ensures that the application's state transitions are consistent and error-handling is straightforward. Each execution of a state machine is tracked and logged, providing clear visibility into the processing state and history, which aids in maintaining consistency across the system.
+Additionally, I have configured an SNS topic to notify my restore topic "runqingc_a16_restore_requests" once Glacier has thawed the data. This SNS topic then delivers the message to an SQS queue.
 
-​	The design includes mechanisms to ensure that operations such as archiving are idempotent. This means that repeated processing of the same message (due to message redelivery, for example) will not lead to inconsistent states, such as multiple archives of the same file.
+A Lambda function handles the second step of the thawing process. It retrieves messages from the queue and uses the `archive_id` and `thaw_job_id` to locate the thawed data in the temporary S3 storage. The `job_id` (wrapped in the 'Description' field) is then used to find the `s3_result_key_file`, which indicates the final location where the file should be restored.
 
-​	By checking the user's role before moving files to Glacier, the system ensures that changes in user status are respected in real-time, preventing premium users from losing access to their files. This approach guarantees that user data is handled correctly according to their subscription level, maintaining system integrity and user trust.
+Moreover, I added a `file_restore_status` key in DynamoDB to provide user feedback on the retrieval status. If the expedited retrieval is initiated successfully, the message "File is being restored; please check back later. Your data will be available in a few minutes" is displayed. Otherwise, if the expedited approach fails, the message "File is being restored; please check back later. Your data will be available in a few hours" is shown.
+
+
+
+### Some consideration of my design
+
+- Each step of the process (subscription, thawing, restoring) is handled by separate components (`views.py`, `thaw_app.py`, `restore.py`). This modularity makes the system easier to maintain and understand.
+- The system gracefully handles errors by attempting expedited retrieval first and falling back to standard retrieval if there is insufficient capacity. This ensures that retrieval attempts are robust and can proceed even when expedited retrieval is not available.
+
+- When using SQS, messages are stored in the queue until they are successfully processed and deleted by the consumer. This means that if a message delivery fails, the message remains in the queue and can be retried. This persistence ensures that messages are not lost even if there are temporary issues with the consumer or processing service.
+- SNS alone does not store messages. If a message fails to be delivered to a subscriber, it may be lost unless you configure a dead-letter queue or another retry mechanism.
+- Set up automatic scaling policies for Lambda functions and other components to handle varying loads. This ensures the system remains responsive under different conditions.
+
+
+
+advantages:
+
+
+
+
+
+
+
+
+
+
+
+----
+
+### A14 Write Up

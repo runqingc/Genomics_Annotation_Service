@@ -53,6 +53,16 @@ University of Chicago
                 <th>Annotated Results File:</th>
                 <td><a href="{{ result_file_download_url }}" download>Download</a></td>
             </tr>
+            {% elif file_restore_status == 'Expedited' %}
+            <tr>
+                <th>Annotated Results File:</th>
+                <td>File is being restored; please check back later. Your data will be available in a few minutes.</a></td>
+            </tr>
+            {% elif file_restore_status == 'Standard' %}
+            <tr>
+                <th>Annotated Results File:</th>
+                <td>File is being restored; please check back later. Your data will be available in a few hours.</a></td>
+            </tr>
             {% else %}
             <tr>
                 <th>Annotated Results File:</th>
