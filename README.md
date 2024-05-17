@@ -42,18 +42,3 @@ Moreover, I added a `file_restore_status` key in DynamoDB to provide user feedba
 
 
 
-advantages:
-
-
-
-
-
-
-
-
-
-
-
-----
-
-### A14 Write Up
