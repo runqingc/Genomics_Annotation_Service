@@ -1,3 +1,25 @@
 #!/bin/bash -ex
 
+
+# Download the GAS source code from S3
+aws s3 cp s3://mpcs-students/runqingc/gas.zip /home/ubuntu/gas.zip
+
+
+# Unzip the source code
+unzip /home/ubuntu/gas.zip -d /home/ubuntu/
+
+# Change ownership of the files to ubuntu user
+chown -R ubuntu:ubuntu /home/ubuntu/gas
+
+chmod +x /home/ubuntu/gas/ann/run_ann_webhook.sh 
+
+sed -i 's/\r$//' /home/ubuntu/gas/ann/run_ann_webhook.sh 
+
+# Activate the virtual environment.
+source /home/ubuntu/.virtualenvs/mpcs/bin/activate
+
+# Using 'tmux' to keep the session running in the background.
+sudo -u ubuntu tmux new-session -d '/home/ubuntu/gas/ann/run_ann_webhook.sh'
+
+
 ### EOUserData
